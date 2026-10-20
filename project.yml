@@ -26,7 +26,7 @@ targets:
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Live Photo Converter needs access to your photo library to convert short videos into Live Photos."
         INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "Access is needed to save created Live Photos to your photo library."
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "4"
+        CURRENT_PROJECT_VERSION: "5"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_IDENTITY: ""

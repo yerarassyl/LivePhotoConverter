@@ -113,11 +113,11 @@ final class PhotoLibraryManager: ObservableObject {
                 // 1. Получаем AVAsset (подходит как обычное видео, так и замедленное/отредактированное)
                 let avAsset = try await requestAVAsset(for: item.asset)
                 
-                // 2. Генерируем парные файлы Live Photo
-                let files = try await LivePhotoMaker.generateLivePhotoFiles(from: avAsset)
+                // 2. Генерируем парные файлы Live Photo с сохранением оригинальной даты съемки
+                let files = try await LivePhotoMaker.generateLivePhotoFiles(from: avAsset, creationDate: item.asset.creationDate)
                 
-                // 3. Сохраняем Live Photo в библиотеку
-                try await saveLivePhoto(files: files)
+                // 3. Сохраняем Live Photo в библиотеку с исходной датой и геопозицией
+                try await saveLivePhoto(files: files, originalAsset: item.asset)
                 
                 // Очищаем временные файлы
                 files.cleanup()
@@ -190,7 +190,7 @@ final class PhotoLibraryManager: ObservableObject {
         }
     }
     
-    private func saveLivePhoto(files: LivePhotoMaker.LivePhotoFiles) async throws {
+    private func saveLivePhoto(files: LivePhotoMaker.LivePhotoFiles, originalAsset: PHAsset) async throws {
         try await PHPhotoLibrary.shared().performChanges {
             let request = PHAssetCreationRequest.forAsset()
             
@@ -201,7 +201,98 @@ final class PhotoLibraryManager: ObservableObject {
             let videoOptions = PHAssetResourceCreationOptions()
             videoOptions.shouldMoveFile = false
             request.addResource(with: .pairedVideo, fileURL: files.videoURL, options: videoOptions)
+            
+            // Восстанавливаем оригинальную дату съемки и геопозицию
+            if let creationDate = originalAsset.creationDate {
+                request.creationDate = creationDate
+            }
+            if let location = originalAsset.location {
+                request.location = location
+            }
         }
+    }
+    
+    // MARK: - Восстановление дат уже созданных Live Photo
+    
+    @Published var isSyncingDates: Bool = false
+    @Published var syncStatusMessage: String = ""
+    
+    /// Синхронизирует даты недавних Live Photo с восстановленными из корзины исходными видео
+    func syncLivePhotoDatesWithRestoredVideos() async {
+        isSyncingDates = true
+        syncStatusMessage = "Поиск Live Photo и видео..."
+        appendLog("Запуск синхронизации дат с оригиналами видео...")
+        
+        // 1. Ищем Live Photo, созданные за последние 48 часов
+        let twoDaysAgo = Calendar.current.date(byAdding: .day, value: -2, to: Date()) ?? Date()
+        let livePhotoOptions = PHFetchOptions()
+        livePhotoOptions.predicate = NSPredicate(
+            format: "mediaType == %d AND (mediaSubtype & %d) != 0 AND creationDate >= %@",
+            PHAssetMediaType.image.rawValue,
+            PHAssetMediaSubtype.photoLive.rawValue,
+            twoDaysAgo as NSDate
+        )
+        let livePhotos = PHAsset.fetchAssets(with: livePhotoOptions)
+        
+        // 2. Ищем видео в галерее (включая восстановленные из «Недавно удаленные»)
+        let videoOptions = PHFetchOptions()
+        videoOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue)
+        let videos = PHAsset.fetchAssets(with: videoOptions)
+        
+        var matchCount = 0
+        var matchedVideosToDelete: [PHAsset] = []
+        
+        var videoList: [PHAsset] = []
+        videos.enumerateObjects { asset, _, _ in
+            videoList.append(asset)
+        }
+        
+        var livePhotoList: [PHAsset] = []
+        livePhotos.enumerateObjects { asset, _, _ in
+            livePhotoList.append(asset)
+        }
+        
+        appendLog("Найдено недавних Live Photo: \(livePhotoList.count), видео в галерее: \(videoList.count)")
+        
+        for livePhoto in livePhotoList {
+            // Ищем парное видео по близкой длительности (разница < 0.15с) с другой датой
+            if let matchedVideo = videoList.first(where: {
+                abs($0.duration - livePhoto.duration) < 0.15 &&
+                $0.creationDate != nil &&
+                abs(($0.creationDate?.timeIntervalSince(livePhoto.creationDate ?? Date()) ?? 0)) > 60
+            }) {
+                if let originalDate = matchedVideo.creationDate {
+                    do {
+                        try await PHPhotoLibrary.shared().performChanges {
+                            let request = PHAssetChangeRequest(for: livePhoto)
+                            request.creationDate = originalDate
+                            if let loc = matchedVideo.location {
+                                request.location = loc
+                            }
+                        }
+                        matchCount += 1
+                        matchedVideosToDelete.append(matchedVideo)
+                        
+                        let formatter = DateFormatter()
+                        formatter.dateStyle = .short
+                        formatter.timeStyle = .short
+                        appendLog("✓ Дата Live Photo обновлена на: \(formatter.string(from: originalDate))")
+                    } catch {
+                        appendLog("✗ Ошибка обновления даты: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+        
+        // Предлагаем удалить дубликаты видео обратно
+        if deleteOriginalsAfterConversion && !matchedVideosToDelete.isEmpty {
+            appendLog("Удаление \(matchedVideosToDelete.count) синхронизированных исходных видео...")
+            try? await deleteAssets(matchedVideosToDelete)
+        }
+        
+        isSyncingDates = false
+        syncStatusMessage = "Восстановлено дат: \(matchCount)"
+        appendLog("Синхронизация завершена. Восстановлено дат: \(matchCount)")
     }
     
     private func deleteAssets(_ assets: [PHAsset]) async throws {

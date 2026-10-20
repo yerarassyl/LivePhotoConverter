@@ -4,6 +4,7 @@ import Photos
 struct ContentView: View {
     @EnvironmentObject var manager: PhotoLibraryManager
     @State private var showLogsSheet = false
+    @State private var showDateSyncSheet = false
     
     var body: some View {
         NavigationStack {
@@ -22,6 +23,13 @@ struct ContentView: View {
             .navigationTitle("Live Photo Converter")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showDateSyncSheet = true
+                    } label: {
+                        Label("Даты", systemImage: "calendar.badge.clock")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showLogsSheet = true
@@ -32,6 +40,9 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showLogsSheet) {
                 logsSheetView
+            }
+            .sheet(isPresented: $showDateSyncSheet) {
+                dateSyncSheetView
             }
         }
     }
@@ -405,6 +416,120 @@ struct ContentView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Закрыть") {
                         showLogsSheet = false
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Экран восстановления дат
+    
+    private var dateSyncSheetView: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    // Баннер с объяснением
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.title)
+                                .foregroundColor(.blue)
+                            Text("Восстановление исходных дат")
+                                .font(.headline)
+                        }
+                        
+                        Text("Если вы уже конвертировали видео и хотите вернуть на созданные Live Photo их точные оригинальные даты и время съемки:")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding()
+                    .background(Color(uiColor: .secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    
+                    // Шаги действий
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Инструкция:")
+                            .font(.headline)
+                        
+                        HStack(alignment: .top, spacing: 12) {
+                            Text("1")
+                                .font(.subheadline.bold())
+                                .foregroundColor(.white)
+                                .frame(width: 24, height: 24)
+                                .background(Color.blue)
+                                .clipShape(Circle())
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Восстановите видео из корзины")
+                                    .font(.subheadline.bold())
+                                Text("Откройте приложение **«Фото» → Альбомы → «Недавно удаленные»**, нажмите **«Выбрать» → «Восстановить все»**.")
+                                    .font(.footnote)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        
+                        HStack(alignment: .top, spacing: 12) {
+                            Text("2")
+                                .font(.subheadline.bold())
+                                .foregroundColor(.white)
+                                .frame(width: 24, height: 24)
+                                .background(Color.blue)
+                                .clipShape(Circle())
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Запустите синхронизацию")
+                                    .font(.subheadline.bold())
+                                Text("Нажмите кнопку ниже: приложение сопоставит Live Photo с восстановленными роликами, перенесет точные даты съемки и геолокацию, а затем снова удалит оригиналы.")
+                                    .font(.footnote)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                    .padding()
+                    .background(Color(uiColor: .secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    
+                    // Кнопка синхронизации
+                    Button {
+                        Task {
+                            await manager.syncLivePhotoDatesWithRestoredVideos()
+                        }
+                    } label: {
+                        HStack {
+                            if manager.isSyncingDates {
+                                ProgressView()
+                                    .tint(.white)
+                            } else {
+                                Image(systemName: "calendar.badge.clock")
+                            }
+                            Text(manager.isSyncingDates ? "Синхронизация..." : "Синхронизировать даты с оригиналами")
+                        }
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(manager.isSyncingDates ? Color.gray : Color.blue)
+                        .foregroundColor(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    .disabled(manager.isSyncingDates)
+                    
+                    if !manager.syncStatusMessage.isEmpty {
+                        Text(manager.syncStatusMessage)
+                            .font(.subheadline.bold())
+                            .foregroundColor(.green)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                    
+                    Spacer()
+                }
+                .padding()
+            }
+            .navigationTitle("Синхронизация дат")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Готово") {
+                        showDateSyncSheet = false
                     }
                 }
             }

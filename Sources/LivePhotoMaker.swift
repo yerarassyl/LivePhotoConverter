@@ -40,7 +40,7 @@ final class LivePhotoMaker {
     }
     
     /// Генерирует парные файлы для Live Photo из переданного AVAsset (любого типа, включая AVComposition)
-    static func generateLivePhotoFiles(from avAsset: AVAsset) async throws -> LivePhotoFiles {
+    static func generateLivePhotoFiles(from avAsset: AVAsset, creationDate: Date? = nil) async throws -> LivePhotoFiles {
         let assetIdentifier = UUID().uuidString
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -52,8 +52,8 @@ final class LivePhotoMaker {
         let keyTime = CMTime(seconds: 0.0, preferredTimescale: 600)
         let frame = try await extractFrame(from: avAsset, at: keyTime)
         
-        // 2. Записываем JPEG с MakerApple метаданными (ID 17 = Content Identifier)
-        try writeImageWithMetadata(cgImage: frame, to: imageURL, assetIdentifier: assetIdentifier)
+        // 2. Записываем JPEG с MakerApple метаданными (ID 17 = Content Identifier) и датой съемки EXIF
+        try writeImageWithMetadata(cgImage: frame, to: imageURL, assetIdentifier: assetIdentifier, creationDate: creationDate)
         
         // 3. Перепаковываем видео в QuickTime MOV с метаданными com.apple.quicktime.content-identifier
         // и com.apple.quicktime.still-image-time
@@ -83,16 +83,29 @@ final class LivePhotoMaker {
         }
     }
     
-    private static func writeImageWithMetadata(cgImage: CGImage, to destinationURL: URL, assetIdentifier: String) throws {
+    private static func writeImageWithMetadata(cgImage: CGImage, to destinationURL: URL, assetIdentifier: String, creationDate: Date? = nil) throws {
         guard let destination = CGImageDestinationCreateWithURL(destinationURL as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
             throw LivePhotoError.cannotCreateImageDestination
         }
         
         // В метаданных MakerApple (тег 17) указывается уникальный ID привязки к видео
         let makerAppleDict: [String: Any] = ["17": assetIdentifier]
-        let metadata: [String: Any] = [
+        var metadata: [String: Any] = [
             kCGImagePropertyMakerAppleDictionary as String: makerAppleDict
         ]
+        
+        if let date = creationDate {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
+            let dateStr = formatter.string(from: date)
+            metadata[kCGImagePropertyExifDictionary as String] = [
+                kCGImagePropertyExifDateTimeOriginal as String: dateStr,
+                kCGImagePropertyExifDateTimeDigitized as String: dateStr
+            ]
+            metadata[kCGImagePropertyTIFFDictionary as String] = [
+                kCGImagePropertyTIFFDateTime as String: dateStr
+            ]
+        }
         
         CGImageDestinationAddImage(destination, cgImage, metadata as CFDictionary)
         guard CGImageDestinationFinalize(destination) else {
