@@ -3,8 +3,9 @@ options:
   bundleIdPrefix: com.yerarassyl
   deploymentTarget:
     iOS: "16.0"
-  xcodeVersion: "15.0"
+  xcodeVersion: "15.4"
   groupSortPosition: top
+  postGenCommand: sed -i '' -e 's/objectVersion = [0-9]*/objectVersion = 56/g' LivePhotoConverter.xcodeproj/project.pbxproj || true
 
 targets:
   LivePhotoConverter:
