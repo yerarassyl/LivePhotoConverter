@@ -22,13 +22,21 @@ targets:
       base:
         PRODUCT_NAME: "LivePhotoConverter"
         PRODUCT_BUNDLE_IDENTIFIER: "com.yerarassyl.LivePhotoConverter"
-        GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: "Sources/Info.plist"
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Приложению требуется доступ к медиатеке для поиска видео 2-3 сек, их конвертации в Live Photo и удаления исходных роликов."
+        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "Требуется доступ для сохранения созданных Live Photo в медиатеку."
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "1"
+        CURRENT_PROJECT_VERSION: "2"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_IDENTITY: ""
         CODE_SIGNING_REQUIRED: "NO"
         CODE_SIGNING_ALLOWED: "NO"
         DEVELOPMENT_TEAM: ""
+    postBuildScripts:
+      - name: Inject PhotoKit Permissions
+        script: |
+          PLIST="${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
+          echo "Injecting permissions into ${PLIST}"
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Приложению требуется доступ к медиатеке для поиска видео 2-3 сек, их конвертации в Live Photo и удаления исходных роликов.'" "${PLIST}" || /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryUsageDescription 'Приложению требуется доступ к медиатеке для поиска видео 2-3 сек, их конвертации в Live Photo и удаления исходных роликов.'" "${PLIST}"
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string 'Требуется доступ для сохранения созданных Live Photo в медиатеку.'" "${PLIST}" || /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryAddUsageDescription 'Требуется доступ для сохранения созданных Live Photo в медиатеку.'" "${PLIST}"
