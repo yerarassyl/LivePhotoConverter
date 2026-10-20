@@ -110,14 +110,11 @@ final class PhotoLibraryManager: ObservableObject {
             progressMessage = "Обработка \(index + 1) из \(videos.count)"
             
             do {
-                // 1. Получаем AVAsset
+                // 1. Получаем AVAsset (подходит как обычное видео, так и замедленное/отредактированное)
                 let avAsset = try await requestAVAsset(for: item.asset)
-                guard let urlAsset = avAsset as? AVURLAsset else {
-                    throw LivePhotoMaker.LivePhotoError.cannotLoadAsset
-                }
                 
                 // 2. Генерируем парные файлы Live Photo
-                let files = try await LivePhotoMaker.generateLivePhotoFiles(from: urlAsset)
+                let files = try await LivePhotoMaker.generateLivePhotoFiles(from: avAsset)
                 
                 // 3. Сохраняем Live Photo в библиотеку
                 try await saveLivePhoto(files: files)
@@ -170,7 +167,18 @@ final class PhotoLibraryManager: ObservableObject {
         options.deliveryMode = .highQualityFormat
         
         return try await withCheckedThrowingContinuation { continuation in
+            let lock = NSLock()
+            var isResumed = false
+            
             imageManager.requestAVAsset(forVideo: asset, options: options) { avAsset, _, info in
+                lock.lock()
+                guard !isResumed else {
+                    lock.unlock()
+                    return
+                }
+                isResumed = true
+                lock.unlock()
+                
                 if let error = info?[PHImageErrorKey] as? Error {
                     continuation.resume(throwing: error)
                 } else if let avAsset = avAsset {

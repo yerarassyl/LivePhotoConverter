@@ -39,8 +39,8 @@ final class LivePhotoMaker {
         }
     }
     
-    /// Генерирует парные файлы для Live Photo из переданного AVAsset
-    static func generateLivePhotoFiles(from avAsset: AVURLAsset) async throws -> LivePhotoFiles {
+    /// Генерирует парные файлы для Live Photo из переданного AVAsset (любого типа, включая AVComposition)
+    static func generateLivePhotoFiles(from avAsset: AVAsset) async throws -> LivePhotoFiles {
         let assetIdentifier = UUID().uuidString
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -101,7 +101,7 @@ final class LivePhotoMaker {
     }
     
     private static func writeVideoWithMetadata(
-        from sourceAsset: AVURLAsset,
+        from sourceAsset: AVAsset,
         to targetURL: URL,
         assetIdentifier: String,
         stillImageTime: CMTime
@@ -125,7 +125,7 @@ final class LivePhotoMaker {
         
         let videoFormatDesc = try await videoTrack.load(.formatDescriptions).first
         
-        // Видеовывод и ввод (прямое сквозное копирование без пережатия для скорости и качества)
+        // Видеовывод и ввод
         let videoOutput = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
         let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: nil, sourceFormatHint: videoFormatDesc)
         videoInput.transform = try await videoTrack.load(.preferredTransform)
@@ -188,56 +188,73 @@ final class LivePhotoMaker {
             throw LivePhotoError.cannotSetupAssetWriter
         }
         
-        writer.startSession(atSourceTime: .zero)
-        
-        // Записываем still image time timed metadata
-        let stillTimeItem = AVMutableMetadataItem()
-        stillTimeItem.key = stillTimeKey as NSString
-        stillTimeItem.keySpace = .quickTimeMetadata
-        stillTimeItem.value = 0 as NSNumber // 0 мс / начало видео
-        stillTimeItem.dataType = stillTimeDataType
-        
-        let timedMetadataGroup = AVTimedMetadataGroup(
-            items: [stillTimeItem],
-            timeRange: CMTimeRange(start: .zero, duration: CMTime(value: 1, timescale: 600))
-        )
-        metadataAdaptor.append(timedMetadataGroup)
-        
-        // Копируем семплы видео
+        // ПАРАЛЛЕЛЬНАЯ запись видео и аудио через DispatchGroup для исключения взаимных блокировок буфера
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let queue = DispatchQueue(label: "livephoto.video.processing")
+            let queue = DispatchQueue(label: "livephoto.muxer.queue", qos: .userInitiated)
+            let group = DispatchGroup()
+            let lock = NSLock()
+            var sessionStarted = false
+            
+            group.enter()
             videoInput.requestMediaDataWhenReady(on: queue) {
                 while videoInput.isReadyForMoreMediaData {
                     if let sample = videoOutput.copyNextSampleBuffer() {
+                        lock.lock()
+                        if !sessionStarted {
+                            let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+                            writer.startSession(atSourceTime: pts)
+                            
+                            // Записываем still image time и сразу отмечаем метадорожку завершенной
+                            let stillTimeItem = AVMutableMetadataItem()
+                            stillTimeItem.key = stillTimeKey as NSString
+                            stillTimeItem.keySpace = .quickTimeMetadata
+                            stillTimeItem.value = 0 as NSNumber
+                            stillTimeItem.dataType = stillTimeDataType
+                            
+                            let timedGroup = AVTimedMetadataGroup(
+                                items: [stillTimeItem],
+                                timeRange: CMTimeRange(start: pts, duration: CMTime(value: 1, timescale: 600))
+                            )
+                            metadataAdaptor.append(timedGroup)
+                            metadataInput.markAsFinished()
+                            
+                            sessionStarted = true
+                        }
+                        lock.unlock()
+                        
                         videoInput.append(sample)
                     } else {
                         videoInput.markAsFinished()
-                        continuation.resume()
+                        group.leave()
                         break
                     }
                 }
             }
-        }
-        
-        // Копируем семплы аудио если есть
-        if let aInput = audioInput, let aOutput = audioOutput {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                let queue = DispatchQueue(label: "livephoto.audio.processing")
+            
+            if let aInput = audioInput, let aOutput = audioOutput {
+                group.enter()
                 aInput.requestMediaDataWhenReady(on: queue) {
                     while aInput.isReadyForMoreMediaData {
                         if let sample = aOutput.copyNextSampleBuffer() {
-                            aInput.append(sample)
+                            lock.lock()
+                            let started = sessionStarted
+                            lock.unlock()
+                            if started {
+                                aInput.append(sample)
+                            }
                         } else {
                             aInput.markAsFinished()
-                            continuation.resume()
+                            group.leave()
                             break
                         }
                     }
                 }
             }
+            
+            group.notify(queue: queue) {
+                continuation.resume()
+            }
         }
-        
-        metadataInput.markAsFinished()
         
         await writer.finishWriting()
         if writer.status != .completed {
