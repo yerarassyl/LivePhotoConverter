@@ -1,7 +1,7 @@
 import Foundation
 import AVFoundation
 import ImageIO
-import MobileCoreServices
+import UniformTypeIdentifiers
 import UIKit
 
 /// Класс, отвечающий за создание парных файлов (изображение JPEG/HEIC + видео QuickTime MOV)
@@ -84,7 +84,7 @@ final class LivePhotoMaker {
     }
     
     private static func writeImageWithMetadata(cgImage: CGImage, to destinationURL: URL, assetIdentifier: String) throws {
-        guard let destination = CGImageDestinationCreateWithURL(destinationURL as CFURL, kUTTypeJPEG, 1, nil) else {
+        guard let destination = CGImageDestinationCreateWithURL(destinationURL as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
             throw LivePhotoError.cannotCreateImageDestination
         }
         
@@ -157,11 +157,13 @@ final class LivePhotoMaker {
         }
         
         // Создаем дорожку timed metadata для still-image-time
+        let stillTimeKey = "com.apple.quicktime.still-image-time"
+        let stillTimeIdentifier = "\(AVMetadataKeySpace.quickTimeMetadata.rawValue)/\(stillTimeKey)"
+        let stillTimeDataType = "com.apple.metadata.datatype.int8"
+        
         let stillTimeSpec: [String: Any] = [
-            kCMMetadataFormatDescriptionMetadataSpecificationKey_Identifier as String:
-                AVMetadataItem.identifier(forKey: AVMetadataKey.quickTimeMetadataKeyStillImageTime.rawValue, keySpace: .quickTimeMetadata)!,
-            kCMMetadataFormatDescriptionMetadataSpecificationKey_DataType as String:
-                kCMMetadataDataType_QuickTimeMetadataStillImageTime as String
+            kCMMetadataFormatDescriptionMetadataSpecificationKey_Identifier as String: stillTimeIdentifier,
+            kCMMetadataFormatDescriptionMetadataSpecificationKey_DataType as String: stillTimeDataType
         ]
         
         var stillTimeFormatDescription: CMMetadataFormatDescription?
@@ -190,10 +192,10 @@ final class LivePhotoMaker {
         
         // Записываем still image time timed metadata
         let stillTimeItem = AVMutableMetadataItem()
-        stillTimeItem.key = AVMetadataKey.quickTimeMetadataKeyStillImageTime as NSString
+        stillTimeItem.key = stillTimeKey as NSString
         stillTimeItem.keySpace = .quickTimeMetadata
         stillTimeItem.value = 0 as NSNumber // 0 мс / начало видео
-        stillTimeItem.dataType = kCMMetadataDataType_QuickTimeMetadataStillImageTime as String
+        stillTimeItem.dataType = stillTimeDataType
         
         let timedMetadataGroup = AVTimedMetadataGroup(
             items: [stillTimeItem],
