@@ -1,0 +1,63 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-ipa:
+    name: Build & Package IPA
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup XcodeGen
+        run: |
+          brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: |
+          xcodegen generate
+
+      - name: Build Xcode Archive
+        run: |
+          xcodebuild archive \
+            -project LivePhotoConverter.xcodeproj \
+            -scheme LivePhotoConverter \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath build/LivePhotoConverter.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Create IPA Package
+        run: |
+          mkdir -p build/Payload
+          cp -R build/LivePhotoConverter.xcarchive/Products/Applications/LivePhotoConverter.app build/Payload/
+          cd build
+          zip -qr LivePhotoConverter.ipa Payload
+          ls -lh LivePhotoConverter.ipa
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LivePhotoConverter-IPA
+          path: build/LivePhotoConverter.ipa
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="v1.0.0-${{ github.run_number }}"
+          gh release create "$TAG_NAME" build/LivePhotoConverter.ipa \
+            --title "LivePhotoConverter $TAG_NAME" \
+            --notes "Сборка приложения Live Photo Converter (IPA) для sideload-установки через AltStore, Sideloadly, TrollStore или Scarlet." || echo "Release created"
